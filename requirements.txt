@@ -1,5 +1,2 @@
---extra-index-url https://pytorch.org
-torch
-transformers
 gradio
 requests
