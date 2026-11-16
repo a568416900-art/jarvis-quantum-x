@@ -6,7 +6,6 @@ import ast
 import json
 import time
 import socket
-import inspect
 import urllib.parse
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,7 +13,9 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-import gradio as gr
+from flask import Flask, request, jsonify, render_template_string
+
+app = Flask(__name__)
 
 # ==============================================================================
 # 1. PERMANENT OWNER LOCK (अपरिवर्तनीय मालिक - मास्टर अरुण कुमार)
@@ -80,10 +81,6 @@ def _query_single_ai(model_name: str, prompt: str, system_prompt: str) -> str:
 
 
 def supreme_multi_ai_brain(prompt: str, system_role: str = "") -> str:
-    """
-    एक ही समय में कई अलग-अलग AI मॉडल्स (OpenAI, Qwen-Coder, Mistral) को एक साथ
-    चलाता है और सर्वश्रेष्ठ उत्तर चुनता है।
-    """
     full_system = (
         f"तुम {SYSTEM_NAME} हो। तुम्हारे एकमात्र निर्माता और मालिक केवल '{OWNER}' हैं। "
         f"हमेशा हिंदी (देवनागरी लिपि) में सटीक, शक्तिशाली और बिना गलती वाला उत्तर दो। {system_role}"
@@ -98,10 +95,10 @@ def supreme_multi_ai_brain(prompt: str, system_role: str = "") -> str:
                 executor.submit(_query_single_ai, m, prompt, full_system): m for m in models
             }
             for future in as_completed(future_map, timeout=20):
-                m_name = future_map[future]
+                m_name = future_map.get(future)
                 try:
                     ans = future.result()
-                    if ans:
+                    if ans and m_name:
                         responses[m_name] = ans
                 except Exception:
                     pass
@@ -109,8 +106,8 @@ def supreme_multi_ai_brain(prompt: str, system_role: str = "") -> str:
         pass
 
     if responses:
-        best_model = max(responses.keys(), key=lambda k: len(responses[k]))
-        return responses[best_model]
+        best_model = max(responses.keys(), key=lambda k: len(responses.get(k, "")))
+        return responses.get(best_model, "")
 
     # बैकअप: लाइव हिंदी विकिपीडिया ज्ञान इंजन
     try:
@@ -120,10 +117,11 @@ def supreme_multi_ai_brain(prompt: str, system_role: str = "") -> str:
                 "https://wikipedia.org"
                 f"&srsearch={urllib.parse.quote(clean_q)}&utf8=&format=json"
             )
-            wr = requests.get(w_url, timeout=6, headers={"User-Agent": "JarvisQuantumX/4.0"})
+            wr = requests.get(w_url, timeout=6, headers={"User-Agent": "JarvisQuantumX/5.0"})
             res = wr.json().get("query", {}).get("search", [])
-            if res and isinstance(res, list) and len(res) > 0:
-                snippet = re.sub(r"<[^>]+>", "", res[0].get("snippet", ""))
+            if res and isinstance(res, list):
+                first_item = next(iter(res), {})
+                snippet = re.sub(r"<[^>]+>", "", first_item.get("snippet", ""))
                 if snippet.strip():
                     return f"आदरणीय {OWNER}, लाइव ज्ञान नेटवर्क से प्राप्त जानकारी:\n{snippet.strip()}"
     except Exception:
@@ -165,7 +163,7 @@ def real_security_audit(raw_url: str) -> str:
         fixes.append("तुरंत वैध HTTPS (SSL/TLS) प्रमाणपत्र लागू करें।")
 
     try:
-        resp = requests.get(target, timeout=8, headers={"User-Agent": "Jarvis-Ethical-Auditor/4.0"})
+        resp = requests.get(target, timeout=8, headers={"User-Agent": "Jarvis-Ethical-Auditor/5.0"})
         hdrs = {k.lower(): v for k, v in resp.headers.items()}
         checks = [
             ("strict-transport-security", "HSTS हेडर अनुपस्थित (MITM खतरा)", "Strict-Transport-Security हेडर जोड़ें।", 15),
@@ -186,10 +184,10 @@ def real_security_audit(raw_url: str) -> str:
     score = max(0, score)
     fix_block = "\n  • ".join(fixes) if fixes else "सभी प्रमुख सुरक्षा कवच मजबूत पाए गए हैं!"
     return (
-        f"🛡️ **[Ethical Security Auditor — वास्तविक स्कैन रिपोर्ट: `{host}`]**\n\n"
-        f"**सुरक्षा स्कोर:** `{score}/100`\n\n"
-        f"**जाँच परिणाम:**\n  • " + "\n  • ".join(findings) + "\n\n"
-        f"**सुरक्षा कवच सुधार उपाय:**\n  • {fix_block}"
+        f"🛡️ [Ethical Security Auditor — वास्तविक स्कैन रिपोर्ट: {host}]\n\n"
+        f"सुरक्षा स्कोर: {score}/100\n\n"
+        f"जाँच परिणाम:\n  • " + "\n  • ".join(findings) + "\n\n"
+        f"सुरक्षा कवच सुधार उपाय:\n  • {fix_block}"
     )
 
 
@@ -227,9 +225,10 @@ def autopilot_worker():
     ]
     idx = 0
     while True:
-        if AUTOPILOT_STATE["running"]:
-            mission = AUTOPILOT_STATE["mission"]
-            topic = f"{mission} — {sub_tasks[idx % len(sub_tasks)]}"
+        if AUTOPILOT_STATE.get("running"):
+            mission = AUTOPILOT_STATE.get("mission", "")
+            task_item = sub_tasks[idx % len(sub_tasks)]
+            topic = f"{mission} — {task_item}"
             idx += 1
             _add_auto_log(f"🧭 [Planner]: स्वायत्त शोध शुरू -> '{topic[:45]}...'")
             thought = supreme_multi_ai_brain(
@@ -246,18 +245,17 @@ threading.Thread(target=autopilot_worker, daemon=True).start()
 
 
 # ==============================================================================
-# 5. 5-CORE COUNCIL & COMMAND PROCESSOR
+# 5. COMMAND PROCESSOR & STATE
 # ==============================================================================
 def get_pending_text() -> str:
     pend = _read_json(PEND_FILE, [])
     mem = _read_json(MEM_FILE, [])
     if not pend:
-        return f"🟢 कोई नया ज्ञान अनुमति के लिए लंबित नहीं है। *(कुल स्थायी ज्ञान: {len(mem)})*"
+        return f"🟢 कोई नया ज्ञान अनुमति के लिए लंबित नहीं है। (कुल स्थायी ज्ञान: {len(mem)})"
+    first_pend = next(iter(pend), "")
     return (
-        f"🧠 **{OWNER}, मैंने यह नया सीखा है, क्या मैं इसे अपने सिस्टम में जोड़ सकता हूँ?**\n\n"
-        f"> {pend[0]}\n\n*(कुल लंबित: {len(pend)} • स्थायी मेमोरी: {len(mem)} • नीचे 'हाँ' या 'नहीं' दबाएं)*"
+        f"🧠 {OWNER}, मैंने यह नया सीखा है, क्या मैं इसे अपने सिस्टम में जोड़ सकता हूँ?\n\n"
+        f"> {first_pend}\n\n(कुल लंबित: {len(pend)} • स्थायी मेमोरी: {len(mem)} • नीचे 'हाँ' या 'नहीं' दबाएं)"
     )
 
 
-def get_auto_logs() -> str:
-    
