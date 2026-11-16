@@ -1,8 +1,4 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-transformers>=4.44,<5
-accelerate
-sentence-transformers>=3.0
-chromadb>=0.5.5
+gradio
+flask
 requests
-huggingface_hub
+
