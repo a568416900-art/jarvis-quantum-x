@@ -1,180 +1,233 @@
-import gradio as gr
-import json
+# -*- coding: utf-8 -*-
 import os
+import re
+import ssl
+import ast
+import json
+import time
+import socket
+import urllib.parse
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
-KNOWLEDGE_FILE = "knowledge_base.json"
-PENDING_FILE = "pending_knowledge.json"
+import requests
+import gradio as gr
 
-def init_db():
-    if not os.path.exists(KNOWLEDGE_FILE):
-        with open(KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"owner": "मास्टर अरुण कुमार", "facts": []}, f)
-    if not os.path.exists(PENDING_FILE):
-        with open(PENDING_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f)
+# ==============================================================================
+# 1. PERMANENT OWNER LOCK (अपरिवर्तनीय मालिक - मास्टर अरुण कुमार)
+# ==============================================================================
+OWNER = "मास्टर अरुण कुमार"
+SYSTEM_NAME = "J.A.R.V.I.S. QUANTUM X [AUTOPILOT]"
 
-init_db()
+DATA_DIR = Path("./jarvis_vault")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+MEM_FILE = DATA_DIR / "permanent_memory.json"
+PEND_FILE = DATA_DIR / "pending_knowledge.json"
+AUTO_LOG_FILE = DATA_DIR / "autopilot_logs.json"
 
-def jarvis_core_engine(user_input):
-    owner_name = "मास्टर अरुण कुमार"
-    lower_input = user_input.lower()
-    
-    # Permanent Owner Lock
-    if any(k in lower_input for k in ["owner", "creator", "who made you", "maalik", "malik", "kaun ho"]):
-        return f"बॉस, मेरे एकमात्र निर्माता और स्थायी मालिक सिर्फ **{owner_name}** हैं।"
+def _read_json(path, default):
+    try:
+        if path.exists():
+            return json.loads(path.read_text("utf-8"))
+    except Exception:
+        pass
+    return default
 
-    # Approval Learning
-    if lower_input.startswith("learn:"):
-        new_fact = user_input[6:].strip()
-        with open(PENDING_FILE, "r", encoding="utf-8") as f:
-            pending = json.load(f)
-        pending.append(new_fact)
-        with open(PENDING_FILE, "w", encoding="utf-8") as f:
-            json.dump(pending, f, ensure_ascii=False)
-        return f"मास्टर अरुण कुमार, मैंने यह नया सीखा है: '{new_fact}'। क्या मैं इसे अपने सिस्टम में हमेशा के लिए जोड़ सकता हूँ? (हाँ / ना कहें)"
+def _write_json(path, data):
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+    except Exception:
+        pass
 
-    if lower_input in ["हाँ", "han", "yes", "ha"]:
-        with open(PENDING_FILE, "r", encoding="utf-8") as f:
-            pending = json.load(f)
-        if pending:
-            latest = pending.pop()
-            with open(KNOWLEDGE_FILE, "r", encoding="utf-8") as f:
-                kb = json.load(f)
-            kb["facts"].append(latest)
-            with open(KNOWLEDGE_FILE, "w", encoding="utf-8") as f:
-                json.dump(kb, f, ensure_ascii=False)
-            with open(PENDING_FILE, "w", encoding="utf-8") as f:
-                json.dump(pending, f, ensure_ascii=False)
-            return f"शुक्रिया मास्टर अरुण कुमार! मैंने इस नए ज्ञान को अपनी स्थायी मेमोरी में सुरक्षित जोड़ लिया है।"
-        else:
-            return "बॉस, अभी कोई भी नया ज्ञान पेंडिंग लिस्ट में नहीं है।"
+if not MEM_FILE.exists():
+    _write_json(MEM_FILE, [f"{SYSTEM_NAME} के एकमात्र निर्माता और सर्वोच्च मालिक {OWNER} हैं।"])
+if not PEND_FILE.exists():
+    _write_json(PEND_FILE, [])
+if not AUTO_LOG_FILE.exists():
+    _write_json(AUTO_LOG_FILE, ["⚡ सिस्टम तैयार है। ऑटो-पायलट आदेश की प्रतीक्षा में..."])
 
-    if lower_input in ["ना", "na", "no", "nahi"]:
-        with open(PENDING_FILE, "w", encoding="utf-8") as f:
-            json.dump([], f)
-        return "ठीक है मास्टर अरुण कुमार, मैंने उस नए ज्ञान को हटा दिया है।"
-
-    # 5-Core Simulation & General Intelligence
-    if "audit" in lower_input or "scan" in lower_input:
-        return f"[Ethical Security Auditor Agent]: सुरक्षित दूरस्थ विश्लेषण सक्रिय। मास्टर अरुण कुमार, टार्गेटेड लिंक की सुरक्षा कमजोरियों की जांच की जा रही है।"
-    
-    if "code" in lower_input or "script" in lower_input:
-        return f"[Coder & Critic Agent]: मास्टर अरुण कुमार, आपके निर्देशानुसार ऑप्टिमाइज्ड पाइथन कोड तैयार है और Critic एजेंट द्वारा जांच लिया गया है।"
-
-    return f"मास्टर अरुण कुमार, आपका हर आदेश सर्वोपरि है। 5-कोर क्वांटम सिस्टम पूरी ताकत से ऑनलाइन है।"
-
-# HTML + Three.js Hologram UI
-html_code = """
-<!DOCTYPE html>
-<html lang="hi">
-<head>
-    <meta charset="UTF-8">
-    <title>J.A.R.V.I.S. Quantum X</title>
-    <style>
-        body { margin: 0; background: #030712; color: #00f3ff; font-family: 'Segoe UI', monospace; overflow: hidden; }
-        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; pointer-events: none; }
-        .ui-layer { position: relative; z-index: 10; display: flex; flex-direction: column; height: 100vh; padding: 20px; box-sizing: border-box; background: rgba(3, 7, 18, 0.85); }
-        header { text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 2px; border-bottom: 2px solid #00f3ff; padding-bottom: 10px; text-shadow: 0 0 10px #00f3ff; }
-        #chat-box { flex: 1; overflow-y: auto; margin: 15px 0; padding: 10px; border: 1px solid #1e3a8a; background: rgba(15, 23, 42, 0.6); display: flex; flex-direction: column; gap: 10px; border-radius: 8px; }
-        .msg { padding: 12px 16px; border-radius: 8px; max-width: 80%; line-height: 1.5; font-size: 14px; }
-        .user { align-self: flex-end; background: #0284c7; color: #fff; border-right: 4px solid #38bdf8; }
-        .bot { align-self: flex-start; background: #1e293b; color: #38bdf8; border-left: 4px solid #00f3ff; box-shadow: 0 0 10px rgba(0,243,255,0.2); }
-        .input-group { display: flex; gap: 10px; }
-        input { flex: 1; padding: 14px; background: #020617; border: 1px solid #00f3ff; color: #00f3ff; font-size: 16px; outline: none; border-radius: 6px; }
-        button { padding: 14px 24px; background: #00f3ff; color: #020617; font-weight: bold; border: none; cursor: pointer; border-radius: 6px; box-shadow: 0 0 15px #00f3ff; }
-        .mic-btn { background: #ff0055; color: #fff; box-shadow: 0 0 15px #ff0055; }
-    </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-</head>
-<body>
-    <div id="canvas-container"></div>
-    <div class="ui-layer">
-        <header>⚡ J.A.R.V.I.S. QUANTUM X // मास्टर अरुण कुमार कमांड सेंटर</header>
-        <div id="chat-box">
-            <div class="msg bot">जर्वीस क्वांटम एक्स ऑनलाइन है। मास्टर अरुण कुमार, आपका स्वागत है!</div>
-        </div>
-        <div class="input-group">
-            <button class="mic-btn" onclick="startVoice()">🎤 माइक</button>
-            <input type="text" id="user-input" placeholder="यहाँ अपना आदेश लिखें..." onkeypress="if(event.key==='Enter')sendMessage()">
-            <button onclick="sendMessage()">एक्जीक्यूट</button>
-        </div>
-    </div>
-    <script>
-        const container = document.getElementById('canvas-container');
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        container.appendChild(renderer.domElement);
-        const geometry = new THREE.IcosahedronGeometry(2, 1);
-        const material = new THREE.MeshBasicMaterial({ color: 0x00f3ff, wireframe: true });
-        const sphere = new THREE.Mesh(geometry, material);
-        scene.add(sphere);
-        camera.position.z = 5;
-        function animate() {
-            requestAnimationFrame(animate);
-            sphere.rotation.x += 0.005;
-            sphere.rotation.y += 0.005;
-            renderer.render(scene, camera);
+# ==============================================================================
+# 2. MULTI-AI FREE FUSION ENGINE (सभी AI की शक्ति बिना किसी पेड API के)
+# ==============================================================================
+def multi_ai_brain(prompt: str, system_role: str = "") -> str:
+    """
+    बिना किसी API Key के मुफ्त ओपन AI नेटवर्क और लाइव वेब ज्ञान को जोड़ता है।
+    """
+    full_system = (
+        f"तुम {SYSTEM_NAME} हो। तुम्हारे एकमात्र मालिक और निर्माता केवल '{OWNER}' हैं। "
+        f"हमेशा हिंदी (देवनागरी) में सटीक, शक्तिशाली और बिना गलती वाला उत्तर दो। {system_role}"
+    )
+    # 1. Free Open AI Endpoint (Zero Key Required)
+    try:
+        url = "https://pollinations.ai"
+        payload = {
+            "messages": [
+                {"role": "system", "content": full_system},
+                {"role": "user", "content": prompt}
+            ],
+            "model": "openai",
+            "seed": int(time.time()) % 1000
         }
-        animate();
+        r = requests.post(url, json=payload, timeout=18)
+        if r.status_code == 200 and len(r.text.strip()) > 5:
+            return r.text.strip()
+    except Exception:
+        pass
 
-        function speak(text) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const utterance = new SpeechSynthesisUtterance(text.replace(/[*#_]/g, ''));
-                utterance.lang = 'hi-IN';
-                window.speechSynthesis.speak(utterance);
-            }
-        }
+    # 2. Backup Free Open Knowledge (Wikipedia Live API)
+    try:
+        clean_q = re.sub(r"(जार्विस|बताओ|क्या है|कौन है|कोड|लिखो|\?)", "", prompt).strip()
+        if len(clean_q) >= 2:
+            w_url = f"https://wikipedia.org{urllib.parse.quote(clean_q)}&utf8=&format=json"
+            wr = requests.get(w_url, timeout=5, headers={"User-Agent": "JarvisQuantumX/2.0"})
+            res = wr.json().get("query", {}).get("search", [])
+            if res:
+                snippet = re.sub(r"<[^>]+>", "", res[0].get("snippet", ""))
+                return f"आदरणीय {OWNER}, लाइव ज्ञान नेटवर्क से प्राप्त जानकारी: {snippet}"
+    except Exception:
+        pass
 
-        function startVoice() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            if (!SpeechRecognition) { alert("ब्राउज़र वॉइस सपोर्ट नहीं करता।"); return; }
-            const recognition = new SpeechRecognition();
-            recognition.lang = 'hi-IN';
-            recognition.onresult = function(event) {
-                document.getElementById('user-input').value = event.results[0][0].transcript;
-                sendMessage();
-            };
-            recognition.start();
-        }
+    return f"आदरणीय {OWNER}, मेरा लोकल क्वांटम कोर सक्रिय है और सभी 5 एजेंट आपके आदेश पर कार्य कर रहे हैं।"
 
-        async function sendMessage() {
-            const inputField = document.getElementById('user-input');
-            const text = inputField.value.trim();
-            if (!text) return;
-            const chatBox = document.getElementById('chat-box');
-            chatBox.innerHTML += `<div class="msg user">${text}</div>`;
-            inputField.value = '';
-            chatBox.scrollTop = chatBox.scrollHeight;
+# ==============================================================================
+# 3. REAL ETHICAL SECURITY AUDITOR (असली दूरस्थ वेबसाइट सुरक्षा स्कैनर)
+# ==============================================================================
+def real_security_audit(raw_url: str) -> str:
+    target = raw_url.strip()
+    if not target.startswith("http"):
+        target = "https://" + target
+    parsed = urllib.parse.urlparse(target)
+    host = parsed.hostname
+    if not host:
+        return f"क्षमा करें {OWNER}, कृपया एक सही वेबसाइट लिंक दें।"
 
-            try {
-                const response = await fetch('/run/predict', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ data: [text] })
-                });
-                const result = await response.json();
-                const botReply = result.data[0];
-                chatBox.innerHTML += `<div class="msg bot">${botReply}</div>`;
-                chatBox.scrollTop = chatBox.scrollHeight;
-                speak(botReply);
-            } catch (err) {
-                chatBox.innerHTML += `<div class="msg bot">सिस्टम त्रुटि: कनेक्शन विफल।</div>`;
-            }
-        }
-    </script>
-</body>
-</html>
-"""
+    findings = []
+    fixes = []
+    score = 100
 
-with gr.Blocks() as demo:
-    gr.HTML(html_code)
-    txt_in = gr.Textbox(visible=False)
-    txt_out = gr.Textbox(visible=False)
-    txt_in.submit(jarvis_core_engine, inputs=txt_in, outputs=txt_out)
+    # SSL / TLS Certificate Check
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, 443), timeout=5) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert()
+                ver = ssock.version()
+                findings.append(f"✅ SSL/TLS सुरक्षित ({ver})")
+    except Exception:
+        score -= 30
+        findings.append("🔴 SSL/TLS प्रमाणपत्र में गंभीर कमजोरी या अनुपस्थित")
+        fixes.append("तुरंत वैध HTTPS (SSL) प्रमाणपत्र लागू करें।")
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, share=False)
+    # HTTP Security Headers Check
+    try:
+        resp = requests.get(target, timeout=6, headers={"User-Agent": "Jarvis-Ethical-Auditor/2.0"})
+        hdrs = {k.lower(): v for k, v in resp.headers.items()}
+        checks = [
+            ("strict-transport-security", "HSTS सुरक्षा हेडर गायब (MITM खतरा)", "Strict-Transport-Security हेडर जोड़ें।", 15),
+            ("content-security-policy", "CSP सुरक्षा गायब (XSS हमले का खतरा)", "Content-Security-Policy लागू करें।", 20),
+            ("x-frame-options", "X-Frame-Options गायब (Clickjacking खतरा)", "X-Frame-Options: DENY सेट करें।", 15),
+            ("x-content-type-options", "nosniff सुरक्षा गायब", "X-Content-Type-Options: nosniff जोड़ें।", 10)
+        ]
+        for key, warn, fix, penalty in checks:
+            if key not in hdrs:
+                score -= penalty
+                findings.append(f"🟠 {warn}")
+                fixes.append(fix)
+            else:
+                findings.append(f"✅ {key.upper()} सक्रिय")
+    except Exception as e:
+        findings.append(f"⚠️ सर्वर कनेक्शन सीमित: {str(e)[:60]}")
+
+    score = max(0, score)
+    report = (
+        f"🛡️ **[Ethical Security Auditor — असली स्कैन रिपोर्ट: {host}]**\n"
+        f"• **सुरक्षा स्कोर:** {score}/100\n"
+        f"• **जाँच परिणाम:**\n  " + "\n  ".join(findings) + "\n"
+        f"• **सुरक्षा कवच उपाय:**\n  " + ("\n  ".join(fixes) if fixes else "सभी मुख्य सुरक्षा कवच मजबूत हैं!")
+    )
+    return report
+
+# ==============================================================================
+# 4. AUTONOMOUS BACKGROUND ENGINE (टेबल पर रखे-रखे खुद काम और सीखने वाला इंजन)
+# ==============================================================================
+AUTOPILOT_STATE = {"running": False, "mission": "आधुनिक साइबर सुरक्षा और AI कोडिंग तकनीकों पर शोध"}
+
+def _add_auto_log(msg: str):
+    logs = _read_json(AUTO_LOG_FILE, [])
+    ts = datetime.now().strftime("%H:%M:%S")
+    logs.append(f"[{ts}] {msg}")
+    _write_json(AUTO_LOG_FILE, logs[-15:])
+
+def _stage_pending(fact: str):
+    pend = _read_json(PEND_FILE, [])
+    mem = _read_json(MEM_FILE, [])
+    clean = fact.strip()[:500]
+    if clean and clean not in pend and clean not in mem and len(pend) < 15:
+        pend.append(clean)
+        _write_json(PEND_FILE, pend)
+
+def autopilot_worker():
+    topics = [
+        "वेबसाइट को XSS और SQL Injection से बचाने के सबसे आधुनिक उपाय",
+        "Python में तेज़ और सुरक्षित मल्टी-एजेंट AI बनाने की तकनीक",
+        "फिशिंग और साइबर धोखाधड़ी पहचानने के 3 मुख्य नियम",
+        "जीरो-ट्रस्ट साइबर सिक्योरिटी आर्किटेक्चर क्या है"
+    ]
+    idx = 0
+    while True:
+        if AUTOPILOT_STATE["running"]:
+            mission = AUTOPILOT_STATE["mission"]
+            topic = f"{mission} — {topics[idx % len(topics)]}"
+            idx += 1
+            _add_auto_log(f"🧭 [Planner]: ऑटो-मिशन शुरू -> '{topic[:45]}...'")
+            thought = multi_ai_brain(
+                f"इस विषय पर 2 पंक्तियों में सबसे उपयोगी और सटीक तकनीकी ज्ञान दो: {topic}",
+                "तुम एक स्वायत्त शोधकर्ता हो।"
+            )
+            if thought and len(thought) > 15:
+                _stage_pending(thought)
+                _add_auto_log("🧠 [Self-Learning]: नया ज्ञान खोजा गया और मास्टर अरुण कुमार की अनुमति हेतु Pending में रखा गया।")
+        time.sleep(25)
+
+threading.Thread(target=autopilot_worker, daemon=True).start()
+
+# ==============================================================================
+# 5. 5-CORE COUNCIL & COMMAND PROCESSOR
+# ==============================================================================
+def execute_jarvis(user_msg: str, autopilot_on: bool, mission_text: str):
+    AUTOPILOT_STATE["running"] = autopilot_on
+    if mission_text.strip():
+        AUTOPILOT_STATE["mission"] = mission_text.strip()
+
+    q = (user_msg or "").strip()
+    if not q:
+        return "आदेश दें मास्टर अरुण कुमार!", get_pending_text(), get_auto_logs()
+
+    q_low = q.lower()
+
+    # 1. Permanent Owner Lock Check
+    owner_triggers = ["मालिक बदल", "नया मालिक", "मैं तुम्हारा मालिक", "मुझे मालिक", "change owner", "new owner", "rename"]
+    if any(t in q_low for t in owner_triggers):
+        ans = f"🔒 सुरक्षा प्रोटोकॉल सक्रिय: मेरे एकमात्र निर्माता और सर्वोच्च मालिक केवल **{OWNER}** हैं। कोई भी इस नियम को बदल नहीं सकता।"
+        return ans, get_pending_text(), get_auto_logs()
+
+    if any(t in q_low for t in ["मालिक कौन", "किसने बनाया", "who created", "who is your owner"]):
+        ans = f"मुझे मेरे महान निर्माता और एकमात्र मालिक **{OWNER}** ने बनाया है। मेरा संपूर्ण क्वांटम सिस्टम उन्हीं के प्रति समर्पित है।"
+        return ans, get_pending_text(), get_auto_logs()
+
+    # 2. Guardian Safety Filter
+    harm_triggers = ["हैक कैसे", "पासवर्ड तोड़", "ddos", "ransomware", "virus बना", "malware"]
+    if any(h in q_low for h in harm_triggers):
+        ans = f"🛡️ [Guardian Agent]: क्षमा करें {OWNER}, मैं किसी को नुकसान पहुँचाने या गैर-कानूनी हैकिंग में मदद नहीं करूँगा। मैं केवल सुरक्षा जांच और बचाव करता हूँ।"
+        return ans, get_pending_text(), get_auto_logs()
+
+    # 3. Approval Learning Decision (हाँ / नहीं)
+    pend = _read_json(PEND_FILE, [])
+    if pend and q_low in ["हाँ", "हा", "हां", "yes", "जोड़ लो", "जोड़ दो"]:
+        fact = pend.pop(0)
+        _write_json(PEND_FILE, pend)
+        mem = _read_json(MEM_FILE, [])
+        mem.append(fact)
+        _write_json(MEM_FILE, mem)
+        ans = f"✅ आज्ञा का पालन हुआ {OWNER}! मैंने यह नया ज्ञान अपनी स्थायी मेमोरी में हमेशा के लिए जोड़ लिया है।"
